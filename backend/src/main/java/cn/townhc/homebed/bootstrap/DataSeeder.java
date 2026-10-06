@@ -42,6 +42,7 @@ public class DataSeeder implements CommandLineRunner {
     private final VisitCareResultRepository careResultRepository;
     private final VisitPhotoRepository photoRepository;
     private final VisitExceptionRepository exceptionRepository;
+    private final NoShowCaseRepository noShowCaseRepository;
     private final MaterialRepository materialRepository;
     private final MaterialTransactionRepository materialTxRepository;
     private final ChargeCatalogRepository catalogRepository;
@@ -118,8 +119,11 @@ public class DataSeeder implements CommandLineRunner {
                 bd("68"), true, "乙类", bd("0.70"), true, "2-8℃冷链保存运输", null);
         ChargeCatalog antibiotic = catalog("DR002", "头孢呋辛酯片", CatalogCategory.DRUG, "盒",
                 bd("26"), true, "甲类", bd("0.90"), false, null, null);
+        // 上门未遇空跑费：护士已到现场、家属无提前请假未开门时的交通/时间补偿（自费，不走医保）
+        ChargeCatalog emptyRunFee = catalog("QT001", "上门未遇空跑费", CatalogCategory.EMPTY_RUN_FEE, "次",
+                bd("30"), false, "丙类", bd("0"), false, "家属未提前请假且上门未遇，经卫生院审核后计收", null);
         catalogRepository.saveAll(List.of(visitFee, ulcer, dressing, catheter, glucose, bp,
-                inject, dressingKit, catheterKit, gauze, insulin, antibiotic));
+                inject, dressingKit, catheterKit, gauze, insulin, antibiotic, emptyRunFee));
 
         // ===== 耗材库存 =====
         Material mDressingKit = material("HC001", "一次性换药包", "无菌独立包装", "个",
@@ -387,6 +391,148 @@ public class DataSeeder implements CommandLineRunner {
         openRisk.setReporter(doctor1);
         openRisk.setReportedAt(LocalDateTime.now().minusHours(8));
         riskRepository.save(openRisk);
+
+        // ===== 上门未遇（护士到家、家属未开门）演示工单 =====
+        LocalDate yesterday = LocalDate.now().minusDays(1);
+        LocalDate twoDaysAgo = LocalDate.now().minusDays(2);
+
+        // 案例1（患者2）：昨天上午上门无人应答，家属未提前请假，待家属提交补充说明
+        String door1 = placeholderImage("door", "门口照 李长顺宅 " + yesterday, new Color(238, 238, 245));
+        Visit nsVisit1 = scheduledVisit(plan2, p2, nurse1,
+                LocalDateTime.now().minusDays(1).withHour(10).withMinute(0).withSecond(0).withNano(0),
+                "上门未遇挂起：等待家属补充说明与卫生院审核");
+        nsVisit1.setStartedAt(nsVisit1.getScheduledAt().plusMinutes(2));
+        nsVisit1.setStatus(VisitStatus.EXCEPTION);
+        visitRepository.save(nsVisit1);
+        NoShowCase ns1 = new NoShowCase();
+        ns1.setCaseNo("WY" + yesterday.toString().replace("-", "") + "001");
+        ns1.setVisit(nsVisit1);
+        ns1.setPatient(p2);
+        ns1.setNurse(nurse1);
+        ns1.setArrivedAt(nsVisit1.getScheduledAt().plusMinutes(2));
+        ns1.setLeftAt(nsVisit1.getScheduledAt().plusMinutes(27));
+        ns1.setArrivalLocationSnapshot(p2.getAddress() + "（GPS 签到，与登记地址一致）");
+        ns1.setArrivalLongitude(p2.getLongitude());
+        ns1.setArrivalLatitude(p2.getLatitude());
+        ns1.setReason(NoShowReason.NO_ANSWER);
+        ns1.setPhoneCallsJson("[{\"contact\":\"家属王建国\",\"phone\":\"13800001111\","
+                + "\"at\":\"" + nsVisit1.getScheduledAt().plusMinutes(3)
+                + "\",\"durationSeconds\":0,\"result\":\"未接通\"},"
+                + "{\"contact\":\"照护人刘桂兰\",\"phone\":\"13800002111\","
+                + "\"at\":\"" + nsVisit1.getScheduledAt().plusMinutes(12)
+                + "\",\"durationSeconds\":0,\"result\":\"未接通\"}]");
+        ns1.setWaitMinutes(25);
+        ns1.setDoorPhotoPathsJson("[\"" + door1 + "\"]");
+        ns1.setAdvanceLeaveNotified(false);
+        ns1.setNurseNote("多次敲门无人应答，先后拨打家属与照护人电话均未接通，门口等待 25 分钟后离开，已拍门口照片留证");
+        ns1.setStatus(NoShowStatus.PENDING_FAMILY);
+        noShowCaseRepository.save(ns1);
+
+        // 案例2（患者3）：两天前上门未遇，家属说明“手机没电未接到电话”，卫生院核实后减免关闭
+        String door2 = placeholderImage("door", "门口照 孙桂英宅 " + twoDaysAgo, new Color(238, 238, 245));
+        Visit nsVisit2 = scheduledVisit(plan3, p3, nurse3,
+                LocalDateTime.now().minusDays(2).withHour(9).withMinute(30).withSecond(0).withNano(0),
+                "上门未遇：家属手机没电，核实后减免，本次任务关闭");
+        nsVisit2.setStartedAt(nsVisit2.getScheduledAt().plusMinutes(1));
+        nsVisit2.setStatus(VisitStatus.CANCELLED);
+        visitRepository.save(nsVisit2);
+        NoShowCase ns2 = new NoShowCase();
+        ns2.setCaseNo("WY" + twoDaysAgo.toString().replace("-", "") + "002");
+        ns2.setVisit(nsVisit2);
+        ns2.setPatient(p3);
+        ns2.setNurse(nurse3);
+        ns2.setArrivedAt(nsVisit2.getScheduledAt().plusMinutes(1));
+        ns2.setLeftAt(nsVisit2.getScheduledAt().plusMinutes(21));
+        ns2.setArrivalLocationSnapshot(p3.getAddress() + "（GPS 签到）");
+        ns2.setArrivalLongitude(p3.getLongitude());
+        ns2.setArrivalLatitude(p3.getLatitude());
+        ns2.setReason(NoShowReason.PHONE_UNREACHABLE);
+        ns2.setPhoneCallsJson("[{\"contact\":\"儿媳周小丽\",\"phone\":\"13800003111\","
+                + "\"at\":\"" + nsVisit2.getScheduledAt().plusMinutes(5)
+                + "\",\"durationSeconds\":0,\"result\":\"未接通（对方手机关机）\"}]");
+        ns2.setWaitMinutes(20);
+        ns2.setDoorPhotoPathsJson("[\"" + door2 + "\"]");
+        ns2.setAdvanceLeaveNotified(false);
+        ns2.setNurseNote("敲门无人应答，家属电话提示关机，等待 20 分钟并拍照留证");
+        ns2.setStatus(NoShowStatus.WAIVED);
+        ns2.setFamilyReason(NoShowFamilyReason.PHONE_DEAD);
+        ns2.setFamilyNote("当天手机没电自动关机，没能接到护士电话，发现后立刻回电致歉，并非故意失约");
+        ns2.setFamilyUser(family);
+        ns2.setFamilySubmittedAt(nsVisit2.getScheduledAt().plusHours(2));
+        ns2.setDecision(NoShowDecision.WAIVE);
+        ns2.setDecisionNote("家属当天回电说明并致歉，调取通话记录确属手机关机非主观失约，且本月首次，予以减免不收空跑费，本次任务并入下次巡诊");
+        ns2.setReviewer(admin);
+        ns2.setReviewedAt(LocalDateTime.now().minusDays(2).withHour(15).withMinute(0).withSecond(0).withNano(0));
+        ns2.setEmptyRunFee(BigDecimal.ZERO);
+        ns2.setServiceDeducted(false);
+        ns2.setBilled(false);
+        noShowCaseRepository.save(ns2);
+
+        // 案例3（新患者5）：护士上门得知患者临时送医，家庭病床暂停，等待医生重新评估后恢复
+        Patient p5 = patient("马桂兰", "女", 78, "卧床", DiseaseCategory.HYPERTENSION,
+                InsuranceType.URBAN_RESIDENT, "河西村老院 6 号", 30.6626, 117.4702, family,
+                "马桂兰儿子·马强", "13800005111");
+        patientRepository.save(p5);
+        BedApplication a5 = approvedApp(p5, family, doctor1,
+                "高血压 3 级伴脑梗死后遗症长期卧床，需定期上门测压、用药提醒与压疮预防。",
+                "血压监测、用药提醒、健康指导",
+                (int) Math.round(ApplicationService.distanceMeters(
+                        ApplicationService.TOWN_HC_LAT, ApplicationService.TOWN_HC_LNG,
+                        p5.getLatitude(), p5.getLongitude())),
+                "儿子白天上班，晚间照护", "村中平房，具备护理条件",
+                true, "居民医保正常",
+                RiskLevel.MEDIUM, "长期卧床，再发心脑血管事件风险较高",
+                "符合建床条件，每周 2 次上门随访，病情变化随时转诊", "JC-0005");
+        applicationRepository.save(a5);
+        VisitPlan plan5 = new VisitPlan();
+        plan5.setPlanNo("JH" + LocalDate.now().toString().replace("-", "") + "003");
+        plan5.setApplication(a5);
+        plan5.setPatient(p5);
+        plan5.setDoctor(doctor1);
+        plan5.setNurse(nurse2);
+        plan5.setStartDate(LocalDate.now().minusWeeks(1));
+        plan5.setExpectedEndDate(LocalDate.now().plusWeeks(3));
+        plan5.setTimesPerWeek(2);
+        plan5.setStatus(PlanStatus.PAUSED);
+        plan5.setPlanContent("血压监测 2次/周；用药提醒；健康指导");
+        plan5.setScheduleExplanation("· 选择责任护士【陈雪】：负责河西片区路线，与该村在管患者拼单上门\n"
+                + "⚠ 患者长期卧床、再发急症风险高：如遇临时送医，先暂停病床，待家庭医生复评后再恢复巡诊\n");
+        planRepository.save(plan5);
+
+        String door3 = placeholderImage("door", "门口照 马桂兰宅 临时送医", new Color(245, 238, 238));
+        Visit nsVisit3 = scheduledVisit(plan5, p5, nurse2,
+                LocalDateTime.now().minusHours(6).withMinute(0).withSecond(0).withNano(0),
+                "患者临时送医，家庭病床暂停，等待医生重新评估");
+        nsVisit3.setStartedAt(nsVisit3.getScheduledAt().plusMinutes(2));
+        nsVisit3.setStatus(VisitStatus.EXCEPTION);
+        visitRepository.save(nsVisit3);
+        a5.setStatus(BedApplyStatus.SUSPENDED);
+        applicationRepository.save(a5);
+        NoShowCase ns3 = new NoShowCase();
+        ns3.setCaseNo("WY" + LocalDate.now().toString().replace("-", "") + "003");
+        ns3.setVisit(nsVisit3);
+        ns3.setPatient(p5);
+        ns3.setNurse(nurse2);
+        ns3.setArrivedAt(nsVisit3.getScheduledAt().plusMinutes(2));
+        ns3.setLeftAt(nsVisit3.getScheduledAt().plusMinutes(18));
+        ns3.setArrivalLocationSnapshot(p5.getAddress() + "（GPS 签到）");
+        ns3.setArrivalLongitude(p5.getLongitude());
+        ns3.setArrivalLatitude(p5.getLatitude());
+        ns3.setReason(NoShowReason.PATIENT_EMERGENCY);
+        ns3.setPhoneCallsJson("[{\"contact\":\"儿子马强\",\"phone\":\"13800005111\","
+                + "\"at\":\"" + nsVisit3.getScheduledAt().plusMinutes(6)
+                + "\",\"durationSeconds\":45,\"result\":\"已接通：老人凌晨头晕呕吐送县医院检查\"}]");
+        ns3.setWaitMinutes(16);
+        ns3.setDoorPhotoPathsJson("[\"" + door3 + "\"]");
+        ns3.setAdvanceLeaveNotified(false);
+        ns3.setNurseNote("邻居告知老人凌晨突发头晕呕吐已由家属送县医院；电话联系家属确认在急诊检查，暂不能上门护理");
+        ns3.setStatus(NoShowStatus.BED_PAUSED);
+        ns3.setFamilyReason(NoShowFamilyReason.EMERGENCY_TEMP);
+        ns3.setFamilyNote("老人凌晨突发头晕呕吐，紧急送县医院急诊检查，走得急没来得及请假，后续诊断结果会补交卫生院");
+        ns3.setFamilyUser(family);
+        ns3.setFamilySubmittedAt(nsVisit3.getScheduledAt().plusHours(1));
+        ns3.setBedPausedAt(nsVisit3.getScheduledAt().plusMinutes(18));
+        noShowCaseRepository.save(ns3);
 
         // 患者4：待生成计划（批准未排班）
         // 患者1：待评估

@@ -13,13 +13,17 @@ const L = {
   CareResultStatus: { DONE: '已完成', SKIPPED: '未执行', ABNORMAL: '异常中止' },
   OrderType: { PRESCRIPTION: '调整处方', FOLLOW_UP: '安排复诊', REFERRAL: '建议转诊', CARE_PLAN_CHANGE: '调整护理方案' },
   OrderStatus: { PROPOSED: '已下达', REMOTE_REVIEWED: '远程复核通过', CONFIRMED: '已确认', EXECUTED: '已执行', VOID: '已作废' },
-  CatalogCategory: { VISIT_FEE: '巡诊费', NURSING: '护理项目', CONSUMABLE: '普通耗材', COLDCHAIN_DRUG: '冷链药品', DRUG: '普通药品' },
-  BillSourceType: { VISIT_CARE: '护理执行', MATERIAL: '耗材领用', ORDER: '医嘱费用' },
+  CatalogCategory: { VISIT_FEE: '巡诊费', EMPTY_RUN_FEE: '空跑费', NURSING: '护理项目', CONSUMABLE: '普通耗材', COLDCHAIN_DRUG: '冷链药品', DRUG: '普通药品' },
+  BillSourceType: { VISIT_CARE: '护理执行', MATERIAL: '耗材领用', ORDER: '医嘱费用', EMPTY_RUN: '上门未遇空跑' },
   BillStatus: { DRAFT: '待确认', CONFIRMED: '家属已确认', INSURANCE_REVIEWED: '医保复核完成', DISPUTED: '家属质疑', SETTLED: '已结算' },
   ComplianceStatus: { PENDING: '待审查', COMPLIANT: '合规', VIOLATION: '存疑/违规' },
   RiskSeverity: { LOW: '一般', MEDIUM: '较重', HIGH: '严重' },
   RiskEventStatus: { OPEN: '待处理', CONFIRMED: '已确认', CLOSED: '已闭环' },
-  MaterialTxType: { OUT: '领用消耗', IN: '入库', ADJUST: '盘点调整' }
+  MaterialTxType: { OUT: '领用消耗', IN: '入库', ADJUST: '盘点调整' },
+  NoShowReason: { NO_ANSWER: '敲门无人应答', FAMILY_FORGOT: '家属忘记/未提前请假', PHONE_UNREACHABLE: '电话无法接通', PATIENT_EMERGENCY: '患者临时急诊/送医', ADDRESS_CHANGED: '地址变更/搬迁', OTHER: '其他' },
+  NoShowStatus: { PENDING_FAMILY: '待家属说明', FAMILY_EXPLAINED: '家属已说明', BED_PAUSED: '病床暂停待复评', REVIEWED: '卫生院已审核', REASSESSED: '医生复评已恢复', WAIVED: '已减免关闭' },
+  NoShowDecision: { WAIVE: '减免', CHARGE_EMPTY_RUN: '计空跑费', DEDUCT_SERVICE: '扣除一次服务', ADJUST_NEXT: '调整/顺延下次巡诊', SUSPEND_BED: '暂停家庭病床' },
+  NoShowFamilyReason: { EMERGENCY_TEMP: '临时急诊/送医', PHONE_DEAD: '手机没电/未接到电话', ADDRESS_CHANGE: '地址变更/临时不在原址', FORGOT: '忘记预约', OTHER: '其他' }
 }
 
 export function label(group, value) {
@@ -37,7 +41,8 @@ export function tagType(group, value) {
     BillStatus: { DRAFT: 'warning', CONFIRMED: 'primary', INSURANCE_REVIEWED: 'success', DISPUTED: 'danger', SETTLED: 'success' },
     ComplianceStatus: { PENDING: 'info', COMPLIANT: 'success', VIOLATION: 'danger' },
     RiskSeverity: { LOW: 'success', MEDIUM: 'warning', HIGH: 'danger' },
-    RiskEventStatus: { OPEN: 'danger', CONFIRMED: 'warning', CLOSED: 'success' }
+    RiskEventStatus: { OPEN: 'danger', CONFIRMED: 'warning', CLOSED: 'success' },
+    NoShowStatus: { PENDING_FAMILY: 'danger', FAMILY_EXPLAINED: 'warning', BED_PAUSED: 'danger', REVIEWED: 'primary', REASSESSED: 'success', WAIVED: 'success' }
   }
   return map[group]?.[value] || 'info'
 }

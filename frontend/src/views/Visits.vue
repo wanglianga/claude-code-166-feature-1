@@ -29,6 +29,7 @@
             <el-button link type="info" size="small" @click="viewDetail(row)">记录</el-button>
             <el-button v-if="canExecute(row) && row.status==='SCHEDULED'" link type="primary" size="small" @click="start(row)">签到上门</el-button>
             <el-button v-if="canExecute(row) && (row.status==='IN_PROGRESS')" link type="success" size="small" @click="openComplete(row)">填写记录</el-button>
+            <el-button v-if="canExecute(row) && (row.status==='IN_PROGRESS'||row.status==='SCHEDULED')" link type="danger" size="small" @click="openNoShow(row)">上门未遇</el-button>
             <el-button v-if="canExecute(row) && row.status!=='COMPLETED'" link type="warning" size="small" @click="openException(row)">报异常</el-button>
           </template>
         </el-table-column>
@@ -89,6 +90,17 @@
           <div>签字人：{{ detailData.visit.familySignName }} ｜ {{ detailData.visit.familySignedAt?.replace('T',' ').slice(0,16) }}</div>
         </div>
         <el-empty v-else description="尚未取得家属签字" :image-size="60" />
+
+        <div v-if="detailData.noShowCases && detailData.noShowCases.length" class="section-title mt-16">上门未遇工单（{{ detailData.noShowCases.length }}）</div>
+        <el-alert v-for="ns in (detailData.noShowCases||[])" :key="ns.id" class="mt-12" type="error" :closable="false" show-icon
+                  :title="ns.caseNo + ' · ' + label('NoShowReason', ns.reason) + ' · ' + label('NoShowStatus', ns.status)">
+          <div class="muted">
+            到达 {{ ns.arrivedAt?.replace('T',' ').slice(0,16) }} ｜ 等待 {{ ns.waitMinutes }} 分钟 ｜
+            {{ ns.advanceLeaveNotified ? '家属已提前请假' : '家属未提前请假' }}
+            <span v-if="ns.decision"> ｜ 审核：{{ label('NoShowDecision', ns.decision) }}<span v-if="ns.emptyRunFee>0"> ¥{{ ns.emptyRunFee }}</span></span>
+          </div>
+          <div class="muted">定位：{{ ns.arrivalLocationSnapshot }}</div>
+        </el-alert>
 
         <div v-if="auth.isDoctor && detailData.visit.status==='COMPLETED'" class="mt-16" style="text-align:right">
           <el-button type="warning" @click="openOrder(detailData.visit)">依据本次巡诊下达医嘱（处方/复诊/转诊）</el-button>
@@ -188,6 +200,52 @@
       <template #footer><el-button @click="exceptionVisible=false">取消</el-button>
         <el-button type="warning" @click="submitException">上报（任务将挂起/记录）</el-button></template>
     </el-dialog>
+
+    <!-- 上门未遇登记 -->
+    <el-drawer v-model="noShowVisible" size="560px" title="登记上门未遇（家属未开门）">
+      <el-alert type="warning" :closable="false" class="mb12" show-icon
+                title="请先签到到场；登记后任务挂起。现场证据（定位/电话/等待时长/门口照片）是后续空跑费审核依据，请如实填写。" />
+      <el-form :model="nsForm" label-width="108px">
+        <el-form-item label="未遇原因">
+          <el-select v-model="nsForm.reason" style="width:100%">
+            <el-option v-for="(v,k) in ENUMS.NoShowReason" :key="k" :label="v" :value="k" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="到达定位">
+          <el-input v-model="nsForm.arrivalLocationSnapshot" :placeholder="currentVisit?.patient?.address + '（GPS签到）'" />
+        </el-form-item>
+        <el-form-item label="等待时长(分)">
+          <el-input-number v-model="nsForm.waitMinutes" :min="0" :max="180" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="家属已提前请假">
+          <el-switch v-model="nsForm.advanceLeaveNotified" active-text="已请假" inactive-text="未请假" />
+        </el-form-item>
+
+        <el-divider content-position="left">电话拨打记录</el-divider>
+        <div v-for="(c,i) in nsForm.phoneCalls" :key="i" class="line-row">
+          <el-input v-model="c.contact" placeholder="联系人" style="width:120px" />
+          <el-input v-model="c.phone" placeholder="电话" style="width:140px" />
+          <el-select v-model="c.result" placeholder="结果" style="width:150px">
+            <el-option label="未接通" value="未接通" /><el-option label="已接通" value="已接通" />
+            <el-option label="关机/停机" value="关机/停机" /><el-option label="拒接" value="拒接" />
+          </el-select>
+          <el-input-number v-model="c.durationSeconds" :min="0" :step="10" placeholder="通话秒" style="width:120px" />
+          <el-button link type="danger" @click="nsForm.phoneCalls.splice(i,1)">移除</el-button>
+        </div>
+        <el-button size="small" @click="nsForm.phoneCalls.push({contact:'',phone:'',result:'未接通',durationSeconds:0})">+ 添加拨打记录</el-button>
+
+        <el-divider content-position="left">门口照片（留证）</el-divider>
+        <UploadPhotos v-model="nsForm.doorPhotoPaths" type="door" />
+
+        <el-divider content-position="left">现场说明</el-divider>
+        <el-input v-model="nsForm.nurseNote" type="textarea" :rows="3"
+                  placeholder="敲门/等候情况、邻居反馈、患者是否疑似送医等" />
+      </el-form>
+      <template #footer>
+        <el-button @click="noShowVisible=false">取消</el-button>
+        <el-button type="danger" :loading="nsSubmitting" @click="submitNoShow">确认登记上门未遇并挂起任务</el-button>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
@@ -291,6 +349,48 @@ async function submitException() {
   load()
 }
 
+// 上门未遇
+const noShowVisible = ref(false)
+const nsSubmitting = ref(false)
+const nsForm = reactive({})
+function openNoShow(row) {
+  currentVisit.value = row
+  Object.assign(nsForm, {
+    reason: 'NO_ANSWER',
+    arrivalLocationSnapshot: (row.patient.address || '') + '（GPS签到）',
+    waitMinutes: 20,
+    advanceLeaveNotified: false,
+    phoneCalls: [{
+      contact: row.patient.primaryCaregiver || '家属',
+      phone: row.patient.primaryContactPhone || row.patient.phone || '',
+      result: '未接通', durationSeconds: 0
+    }],
+    doorPhotoPaths: [],
+    nurseNote: ''
+  })
+  noShowVisible.value = true
+}
+async function submitNoShow() {
+  if (!nsForm.arrivalLocationSnapshot) return ElMessage.warning('请记录到达定位')
+  if (nsForm.waitMinutes == null) return ElMessage.warning('请填写等待时长')
+  if (!nsForm.doorPhotoPaths.length) return ElMessage.warning('请至少上传一张门口照片作为证据')
+  const calls = nsForm.phoneCalls.filter(c => c.contact || c.phone)
+  nsSubmitting.value = true
+  try {
+    await api.post(`/no-show/visits/${currentVisit.value.id}/report`, {
+      ...nsForm,
+      longitude: currentVisit.value.patient.longitude,
+      latitude: currentVisit.value.patient.latitude,
+      phoneCalls: calls
+    })
+    ElMessage.success(nsForm.reason === 'PATIENT_EMERGENCY'
+      ? '已登记：患者疑似临时送医，家庭病床已暂停，等待医生重新评估'
+      : '上门未遇已登记，任务挂起，等待家属补充说明与卫生院审核')
+    noShowVisible.value = false
+    load()
+  } finally { nsSubmitting.value = false }
+}
+
 // 医生下达医嘱
 const orderVisible = ref(false)
 const orderForm = reactive({})
@@ -310,7 +410,7 @@ async function submitOrder() {
 <style scoped>
 .head-line { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .section-title { font-weight: 600; margin-bottom: 8px; }
-.mt-16 { margin-top: 16px; } .mb8 { margin-bottom: 8px; }
+.mt-16 { margin-top: 16px; } .mb8 { margin-bottom: 8px; } .mb12 { margin-bottom: 12px; }
 .line-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .photo-thumb { width: 120px; height: 80px; border-radius: 6px; margin: 4px 8px 4px 0; border: 1px solid #ddd; }
 .sign-box { text-align: center; }

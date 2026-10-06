@@ -21,6 +21,7 @@ public class VisitService {
     private final VisitCareResultRepository careResultRepository;
     private final VisitPhotoRepository photoRepository;
     private final VisitExceptionRepository exceptionRepository;
+    private final NoShowCaseRepository noShowCaseRepository;
     private final RiskEventRepository riskEventRepository;
     private final MaterialRepository materialRepository;
     private final MaterialTransactionRepository materialTransactionRepository;
@@ -70,6 +71,7 @@ public class VisitService {
         map.put("careResults", careResultRepository.findByVisitId(id));
         map.put("photos", photoRepository.findByVisitId(id));
         map.put("exceptions", exceptionRepository.findByVisitId(id));
+        map.put("noShowCases", noShowCaseRepository.findByVisitId(id));
         map.put("materialTransactions", materialTransactionRepository.findByVisitId(id));
         return map;
     }

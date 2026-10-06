@@ -47,6 +47,7 @@ const ALL_MENUS = [
   { path: '/plans', title: '巡诊计划排班', icon: 'Calendar', roles: ['ADMIN', 'FAMILY_DOCTOR', 'NURSE'] },
   { path: '/visits', title: '上门巡诊', icon: 'Van', roles: ['NURSE', 'ADMIN', 'FAMILY_DOCTOR'] },
   { path: '/exceptions', title: '巡诊异常', icon: 'WarningFilled', roles: ['NURSE', 'ADMIN', 'FAMILY_DOCTOR'] },
+  { path: '/no-show', title: '上门未遇处理', icon: 'House', roles: ['FAMILY', 'ADMIN', 'FINANCE', 'FAMILY_DOCTOR', 'NURSE'] },
   { path: '/orders', title: '医嘱与远程复核', icon: 'FirstAidKit', roles: ['FAMILY_DOCTOR', 'ADMIN', 'NURSE'] },
   { path: '/risks', title: '风险事件', icon: 'Alert', roles: ['ADMIN', 'FAMILY_DOCTOR', 'NURSE'] },
   { path: '/materials', title: '耗材与冷链', icon: 'Box', roles: ['ADMIN', 'FINANCE', 'NURSE'] },

@@ -29,6 +29,7 @@ public class BillingService {
     private final VisitRepository visitRepository;
     private final VisitCareResultRepository careResultRepository;
     private final MaterialTransactionRepository materialTxRepository;
+    private final NoShowCaseRepository noShowCaseRepository;
     private final ChargeCatalogRepository catalogRepository;
     private final BedApplicationRepository applicationRepository;
     private final SysUserRepository userRepository;
@@ -52,8 +53,23 @@ public class BillingService {
                     return !d.isBefore(periodStart) && !d.isAfter(periodEnd);
                 })
                 .toList();
-        if (visits.isEmpty()) {
-            throw new BusinessException("账期 " + periodStart + " ~ " + periodEnd + " 内没有已完成的巡诊记录，无法出账");
+
+        // 账期内经审核确认计收的上门未遇空跑费
+        List<NoShowCase> chargeableNoShows = noShowCaseRepository
+                .findByPatientIdOrderByCreatedAtDesc(patient.getId()).stream()
+                .filter(c -> c.getDecision() == NoShowDecision.CHARGE_EMPTY_RUN)
+                .filter(c -> c.getEmptyRunFee() != null && c.getEmptyRunFee().signum() > 0)
+                .filter(c -> !Boolean.TRUE.equals(c.getBilled()))
+                .filter(c -> c.getReviewedAt() != null)
+                .filter(c -> {
+                    LocalDate d = c.getReviewedAt().toLocalDate();
+                    return !d.isBefore(periodStart) && !d.isAfter(periodEnd);
+                })
+                .toList();
+
+        if (visits.isEmpty() && chargeableNoShows.isEmpty()) {
+            throw new BusinessException("账期 " + periodStart + " ~ " + periodEnd
+                    + " 内没有已完成的巡诊记录或待出账的空跑费，无法出账");
         }
 
         // 已出账来源（任意状态账单）防重复收费
@@ -150,6 +166,41 @@ public class BillingService {
                 insuranceTotal = insuranceTotal.add(item.getInsuranceAmount());
                 selfTotal = selfTotal.add(item.getSelfPayAmount());
             }
+        }
+
+        // 3) 上门未遇空跑费（卫生院审核确认计收后按账期计入）
+        for (NoShowCase c : chargeableNoShows) {
+            String key = BillSourceType.EMPTY_RUN + ":" + c.getId();
+            if (billedKeys.contains(key)) { skipped++; continue; }
+            BillItem item = new BillItem();
+            item.setBill(bill);
+            item.setSourceType(BillSourceType.EMPTY_RUN);
+            item.setSourceId(c.getId());
+            item.setSourceNo(c.getCaseNo());
+            item.setServiceDate(c.getReviewedAt().toLocalDate().toString());
+            // 空跑费为护士交通/时间补偿，属自费项目，不走医保报销
+            item.setItemCode("EMPTY-RUN");
+            item.setItemName("上门未遇空跑费");
+            item.setCategory(CatalogCategory.EMPTY_RUN_FEE);
+            item.setQuantity(1);
+            item.setUnitPrice(money(c.getEmptyRunFee()));
+            item.setAmount(money(c.getEmptyRunFee()));
+            item.setReimbursable(false);
+            item.setInsuranceCategory("丙类");
+            item.setInsuranceAmount(BigDecimal.ZERO);
+            item.setSelfPayAmount(money(c.getEmptyRunFee()));
+            item.setNote("护士按计划上门家属未开门，现场已留到达定位/电话记录/等待 "
+                    + c.getWaitMinutes() + " 分钟/门口照片；审核决定："
+                    + c.getDecision().label
+                    + (c.getFamilyNote() != null ? "；家属说明：" + c.getFamilyNote() : "")
+                    + (c.getDecisionNote() != null ? "；审核意见：" + c.getDecisionNote() : ""));
+            billItemRepository.save(item);
+            billedKeys.add(key);
+            total = total.add(item.getAmount());
+            selfTotal = selfTotal.add(item.getSelfPayAmount());
+
+            c.setBilled(true);
+            noShowCaseRepository.save(c);
         }
 
         bill.setTotalAmount(money(total));

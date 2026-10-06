@@ -3,6 +3,8 @@ package cn.townhc.homebed.service;
 import cn.townhc.homebed.common.BusinessException;
 import cn.townhc.homebed.domain.entity.*;
 import cn.townhc.homebed.repository.*;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +27,7 @@ public class TraceService {
     private final VisitCareResultRepository careResultRepository;
     private final VisitPhotoRepository photoRepository;
     private final VisitExceptionRepository exceptionRepository;
+    private final NoShowCaseRepository noShowCaseRepository;
     private final MaterialTransactionRepository materialTxRepository;
     private final MedicalOrderRepository orderRepository;
     private final BillRepository billRepository;
@@ -32,6 +35,16 @@ public class TraceService {
     private final ComplianceRecordRepository complianceRepository;
     private final RiskEventRepository riskRepository;
     private final AuditLogRepository auditLogRepository;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private List<String> parsePhotoPaths(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return objectMapper.readValue(json, new TypeReference<>() {});
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
 
     @Transactional(readOnly = true)
     public Map<String, Object> byApplication(Long applicationId) {
@@ -55,6 +68,7 @@ public class TraceService {
                 node.put("careResults", careResultRepository.findByVisitId(v.getId()));
                 node.put("photos", photoRepository.findByVisitId(v.getId()));
                 node.put("exceptions", exceptionRepository.findByVisitId(v.getId()));
+                node.put("noShowCases", noShowCaseRepository.findByVisitId(v.getId()));
                 node.put("materialTransactions", materialTxRepository.findByVisitId(v.getId()));
                 node.put("orders", orderRepository.findByVisitId(v.getId()));
                 visitChain.add(node);
@@ -148,6 +162,40 @@ public class TraceService {
                         v.getVisitNo() + " " + e.getType().label, e.getDescription()
                                 + (e.getHandleConclusion() != null ? "；处理：" + e.getHandleConclusion() : ""),
                         e.getEvidencePath() == null ? List.of() : List.of(e.getEvidencePath()));
+            }
+            @SuppressWarnings("unchecked")
+            List<NoShowCase> noShows = (List<NoShowCase>) node.get("noShowCases");
+            for (NoShowCase ns : noShows) {
+                add(timeline, ns.getArrivedAt(), "上门未遇", "护士·" + safeName(ns.getNurse()),
+                        ns.getCaseNo() + " 上门未遇：" + ns.getReason().label,
+                        "到达定位：" + nz(ns.getArrivalLocationSnapshot())
+                                + "；等待 " + ns.getWaitMinutes() + " 分钟；"
+                                + (Boolean.TRUE.equals(ns.getAdvanceLeaveNotified()) ? "家属已提前请假" : "家属未提前请假")
+                                + "；" + nz(ns.getNurseNote()),
+                        parsePhotoPaths(ns.getDoorPhotoPathsJson()));
+                if (ns.getFamilySubmittedAt() != null) {
+                    add(timeline, ns.getFamilySubmittedAt(), "家属说明", "家属",
+                            ns.getCaseNo() + " 家属补充说明：" + (ns.getFamilyReason() == null ? "-" : ns.getFamilyReason().label),
+                            nz(ns.getFamilyNote()),
+                            ns.getFamilyEvidencePath() == null ? List.of() : List.of(ns.getFamilyEvidencePath()));
+                }
+                if (ns.getBedPausedAt() != null) {
+                    add(timeline, ns.getBedPausedAt(), "病床暂停", "卫生院",
+                            ns.getCaseNo() + " 患者临时送医，家庭病床暂停，等待医生复评",
+                            nz(ns.getDecisionNote()), null);
+                }
+                if (ns.getReviewedAt() != null) {
+                    add(timeline, ns.getReviewedAt(), "未遇审核", "卫生院·" + safeName(ns.getReviewer()),
+                            ns.getCaseNo() + " 审核：" + ns.getDecision().label
+                                    + (ns.getEmptyRunFee() != null && ns.getEmptyRunFee().signum() > 0
+                                    ? "，空跑费 " + ns.getEmptyRunFee() + " 元" : "")
+                                    + (Boolean.TRUE.equals(ns.getServiceDeducted()) ? "，扣除一次服务" : ""),
+                            nz(ns.getDecisionNote()), null);
+                }
+                if (ns.getReassessedAt() != null) {
+                    add(timeline, ns.getReassessedAt(), "复评恢复", "家庭医生·" + safeName(ns.getReassessDoctor()),
+                            ns.getCaseNo() + " 医生复评恢复巡诊", nz(ns.getReassessNote()), null);
+                }
             }
         }
         for (Map<String, Object> bm : bills) {
