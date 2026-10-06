@@ -18,12 +18,14 @@ public final class DomainEnums {
         Role(String label) { this.label = label; }
     }
 
+    /** 建床状态：PAUSED 表示患者临时住院等原因暂停巡诊，复评通过后可恢复 */
     public enum BedApplyStatus {
         DRAFT("草稿"),
         SUBMITTED("待评估"),
         APPROVED("批准建床"),
         REJECTED("驳回"),
         SUSPENDED("暂停建床"),
+        PAUSED("暂停巡诊"),
         CANCELLED("家属撤销");
 
         public final String label;
@@ -76,7 +78,7 @@ public final class DomainEnums {
 
     public enum VisitStatus {
         SCHEDULED("已排班"), IN_PROGRESS("上门中"), COMPLETED("已完成"),
-        EXCEPTION("异常挂起"), CANCELLED("已取消");
+        EXCEPTION("异常挂起"), NO_SHOW("上门未遇"), PAUSED("暂停待复评"), CANCELLED("已取消");
         public final String label; VisitStatus(String l) { this.label = l; } }
 
     public enum ExceptionType {
@@ -112,10 +114,12 @@ public final class DomainEnums {
         NURSING("护理项目"),
         CONSUMABLE("普通耗材"),
         COLDCHAIN_DRUG("冷链药品"),
-        DRUG("普通药品");
+        DRUG("普通药品"),
+        NO_SHOW_FEE("空跑费");
         public final String label; CatalogCategory(String l) { this.label = l; } }
 
-    public enum BillSourceType { VISIT_CARE("护理执行"), MATERIAL("耗材领用"), ORDER("医嘱费用");
+    public enum BillSourceType { VISIT_CARE("护理执行"), MATERIAL("耗材领用"), ORDER("医嘱费用"),
+        NO_SHOW_FEE("上门空跑费");
         public final String label; BillSourceType(String l) { this.label = l; } }
 
     public enum BillStatus {
@@ -134,4 +138,54 @@ public final class DomainEnums {
 
     public enum MaterialTxType { OUT("领用消耗"), IN("入库"), ADJUST("盘点调整");
         public final String label; MaterialTxType(String l) { this.label = l; } }
+
+    /** 上门未遇原因（护士现场判定） */
+    public enum NoShowReason {
+        NO_ANSWER("敲门无人应答"),
+        FAMILY_AWAY("家属临时外出未请假"),
+        PATIENT_HOSPITALIZED("患者临时送医"),
+        ADDRESS_CHANGED("地址变更未更新"),
+        PHONE_UNREACHABLE("电话联系不上"),
+        OTHER("其他");
+        public final String label; NoShowReason(String l) { this.label = l; } }
+
+    /** 家属补充说明的事由分类 */
+    public enum FamilyExcuseReason {
+        EMERGENCY("临时急诊/送医"),
+        PHONE_DEAD("手机没电/未接到"),
+        ADDRESS_CHANGE("地址变更"),
+        FAMILY_EMERGENCY("家中突发急事"),
+        WEATHER_ROUTE("天气/道路原因"),
+        OTHER("其他");
+        public final String label; FamilyExcuseReason(String l) { this.label = l; } }
+
+    /** 空跑费用/扣次审核状态 */
+    public enum NoShowStatus {
+        REPORTED("已登记未遇"),
+        EXPLAINED("家属已说明"),
+        WAITING_EXCUSE("待家属说明"),
+        REVIEWED("卫生院已审核"),
+        CLOSED("已闭环");
+        public final String label; NoShowStatus(String l) { this.label = l; } }
+
+    /** 卫生院审核处置决定 */
+    public enum NoShowDecision {
+        WAIVE("减免（不收费/不扣次）"),
+        CHARGE_FEE("保留空跑费"),
+        DEDUCT_SERVICE("扣除一次服务"),
+        ADJUST_NEXT("调整下一次巡诊"),
+        PARTIAL_FEE("部分减免（调整金额）");
+        public final String label; NoShowDecision(String l) { this.label = l; } }
+
+    /** 家庭病床暂停原因 */
+    public enum BedPauseReason {
+        HOSPITALIZED("患者临时住院/送医"),
+        FAMILY_REQUEST("家属申请暂停"),
+        OTHER("其他");
+        public final String label; BedPauseReason(String l) { this.label = l; } }
+
+    /** 家庭病床暂停/复评状态 */
+    public enum BedPauseStatus {
+        PAUSED("暂停待复评"), REEVALUATED("医生已复评"), RESUMED("已恢复巡诊");
+        public final String label; BedPauseStatus(String l) { this.label = l; } }
 }

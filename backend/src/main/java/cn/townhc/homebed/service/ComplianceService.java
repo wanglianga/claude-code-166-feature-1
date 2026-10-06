@@ -60,6 +60,8 @@ public class ComplianceService {
             List<BillItem> group = entry.getValue();
             if (group.size() <= 1) continue;
             BillItem first = group.get(0);
+            // 空跑费按每次上门未遇逐笔核定，不做同项目每日重复收费判定
+            if (first.getCategory() == CatalogCategory.NO_SHOW_FEE) continue;
             ChargeCatalog cat = first.getItemCode() == null ? null : loadCatalogByCode(first.getItemCode(), catCache);
             Integer limit = cat != null && cat.getDailyLimit() != null ? cat.getDailyLimit() : 1;
             if (group.size() > limit) {

@@ -17,6 +17,8 @@ const routes = [
         meta: { roles: ['NURSE', 'ADMIN', 'FAMILY_DOCTOR'] } },
       { path: 'exceptions', name: '巡诊异常', component: () => import('../views/Exceptions.vue'),
         meta: { roles: ['NURSE', 'ADMIN', 'FAMILY_DOCTOR'] } },
+      { path: 'no-shows', name: '上门未遇改约', component: () => import('../views/NoShows.vue'),
+        meta: { roles: ['NURSE', 'ADMIN', 'FINANCE', 'FAMILY_DOCTOR', 'FAMILY'] } },
       { path: 'orders', name: '医嘱管理', component: () => import('../views/Orders.vue'),
         meta: { roles: ['FAMILY_DOCTOR', 'ADMIN', 'NURSE'] } },
       { path: 'materials', name: '耗材冷链', component: () => import('../views/Materials.vue'),

@@ -31,6 +31,8 @@ public class TraceService {
     private final BillItemRepository billItemRepository;
     private final ComplianceRecordRepository complianceRepository;
     private final RiskEventRepository riskRepository;
+    private final NoShowRecordRepository noShowRepository;
+    private final BedPauseRecordRepository bedPauseRepository;
     private final AuditLogRepository auditLogRepository;
 
     @Transactional(readOnly = true)
@@ -55,6 +57,7 @@ public class TraceService {
                 node.put("careResults", careResultRepository.findByVisitId(v.getId()));
                 node.put("photos", photoRepository.findByVisitId(v.getId()));
                 node.put("exceptions", exceptionRepository.findByVisitId(v.getId()));
+                node.put("noShows", noShowRepository.findByVisitId(v.getId()));
                 node.put("materialTransactions", materialTxRepository.findByVisitId(v.getId()));
                 node.put("orders", orderRepository.findByVisitId(v.getId()));
                 visitChain.add(node);
@@ -148,6 +151,34 @@ public class TraceService {
                         v.getVisitNo() + " " + e.getType().label, e.getDescription()
                                 + (e.getHandleConclusion() != null ? "；处理：" + e.getHandleConclusion() : ""),
                         e.getEvidencePath() == null ? List.of() : List.of(e.getEvidencePath()));
+            }
+            @SuppressWarnings("unchecked")
+            List<NoShowRecord> noShows = (List<NoShowRecord>) node.get("noShows");
+            for (NoShowRecord ns : noShows) {
+                add(timeline, ns.getArrivedAt(), "上门未遇", "护士·" + safeName(ns.getNurse()),
+                        ns.getNoShowNo() + " " + ns.getReason().label,
+                        "到达定位：" + nz(ns.getArrivalLocation())
+                                + "；等待 " + ns.getWaitMinutes() + " 分钟；拨打 " + ns.getCallCount()
+                                + " 次（接通 " + ns.getConnectedCallCount() + "）；家属提前请假："
+                                + (Boolean.TRUE.equals(ns.getEarlyLeaveApproved()) ? "是" : "否")
+                                + (ns.getDecision() != null ? "；审核：" + ns.getDecision().label
+                                + (ns.getApprovedFee() != null && ns.getApprovedFee().signum() > 0
+                                ? " " + ns.getApprovedFee() + " 元" : "") : ""),
+                        ns.getDoorPhotoPaths());
+            }
+        }
+        // 病床暂停/复评/恢复时间线
+        for (BedPauseRecord pr : bedPauseRepository.findByApplicationIdOrderByCreatedAtDesc(app.getId())) {
+            add(timeline, pr.getPausedAt(), "病床暂停", pr.getReason().label,
+                    pr.getPauseNo() + " 家庭病床暂停", pr.getPauseNote(), null);
+            if (pr.getReevaluatedAt() != null) {
+                add(timeline, pr.getReevaluatedAt(), "医生复评", "医生·" + safeName(pr.getReevaluatedBy()),
+                        pr.getPauseNo() + " 重新评估" + pr.getStatus().label, pr.getReevaluationNote(), null);
+            }
+            if (pr.getResumedAt() != null) {
+                add(timeline, pr.getResumedAt(), "恢复巡诊", "医生·" + safeName(pr.getReevaluatedBy()),
+                        pr.getPauseNo() + " 恢复家庭病床巡诊", pr.getResumeNote()
+                                + (pr.getNextVisitAt() != null ? "；首次上门 " + pr.getNextVisitAt() : ""), null);
             }
         }
         for (Map<String, Object> bm : bills) {

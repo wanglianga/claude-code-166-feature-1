@@ -47,6 +47,9 @@ public class DataSeeder implements CommandLineRunner {
     private final ChargeCatalogRepository catalogRepository;
     private final MedicalOrderRepository orderRepository;
     private final RiskEventRepository riskRepository;
+    private final NoShowRecordRepository noShowRepository;
+    private final FamilyExcuseRepository familyExcuseRepository;
+    private final BedPauseRecordRepository bedPauseRepository;
     private final PasswordEncoder passwordEncoder;
     private final BillingService billingService;
 
@@ -118,8 +121,10 @@ public class DataSeeder implements CommandLineRunner {
                 bd("68"), true, "乙类", bd("0.70"), true, "2-8℃冷链保存运输", null);
         ChargeCatalog antibiotic = catalog("DR002", "头孢呋辛酯片", CatalogCategory.DRUG, "盒",
                 bd("26"), true, "甲类", bd("0.90"), false, null, null);
+        ChargeCatalog noShowFee = catalog("KP001", "上门空跑费", CatalogCategory.NO_SHOW_FEE, "次",
+                bd("30"), false, "丙类", bd("0"), false, "家属未请假且未开门，空跑费自理，每日限 1 次", 1);
         catalogRepository.saveAll(List.of(visitFee, ulcer, dressing, catheter, glucose, bp,
-                inject, dressingKit, catheterKit, gauze, insulin, antibiotic));
+                inject, dressingKit, catheterKit, gauze, insulin, antibiotic, noShowFee));
 
         // ===== 耗材库存 =====
         Material mDressingKit = material("HC001", "一次性换药包", "无菌独立包装", "个",
@@ -390,6 +395,208 @@ public class DataSeeder implements CommandLineRunner {
 
         // 患者4：待生成计划（批准未排班）
         // 患者1：待评估
+
+        // ===== 上门未遇演示数据 =====
+        // 1) 患者2：昨天上门未遇，家属已在费用核定前补充说明（手机没电），待卫生院审核
+        Visit nsVisit1 = visitRepository.save(scheduledVisit(plan2, p2, nurse1,
+                LocalDateTime.now().minusDays(1).withHour(9).withMinute(0).withSecond(0).withNano(0),
+                "上门未遇（家属不在家），等待家属补充说明"));
+        nsVisit1.setStatus(VisitStatus.NO_SHOW);
+        nsVisit1.setStartedAt(nsVisit1.getScheduledAt().minusMinutes(15));
+        nsVisit1.setCompletedAt(nsVisit1.getScheduledAt().plusMinutes(25));
+        visitRepository.save(nsVisit1);
+        String door1 = placeholderImage("door", "门口照片 敲门无人应答 " + LocalDate.now().minusDays(1),
+                new Color(238, 238, 245));
+        NoShowRecord ns1 = new NoShowRecord();
+        ns1.setNoShowNo("KP20261004001");
+        ns1.setVisit(nsVisit1);
+        ns1.setPatient(p2);
+        ns1.setNurse(nurse1);
+        ns1.setReason(NoShowReason.FAMILY_AWAY);
+        ns1.setArrivedAt(nsVisit1.getScheduledAt());
+        ns1.setArrivalLocation(p2.getAddress() + "（GPS 与建档地址一致，偏差 12 米）");
+        ns1.setArrivalLongitude(p2.getLongitude());
+        ns1.setArrivalLatitude(p2.getLatitude());
+        ns1.setDoorPhotoPathsJson(cn.townhc.homebed.common.Jsons.write(List.of(door1)));
+        ns1.setDialedPhone(p2.getPrimaryContactPhone());
+        ns1.setCallCount(3);
+        ns1.setConnectedCallCount(0);
+        ns1.setCallLogsJson(cn.townhc.homebed.common.Jsons.write(List.of(
+                java.util.Map.of("phone", p2.getPrimaryContactPhone(), "connected", false,
+                        "durationSec", 0, "time", nsVisit1.getScheduledAt().plusMinutes(2).toString()),
+                java.util.Map.of("phone", p2.getEmergencyPhone(), "connected", false,
+                        "durationSec", 0, "time", nsVisit1.getScheduledAt().plusMinutes(8).toString()),
+                java.util.Map.of("phone", p2.getPrimaryContactPhone(), "connected", false,
+                        "durationSec", 0, "time", nsVisit1.getScheduledAt().plusMinutes(16).toString())
+        )));
+        ns1.setWaitMinutes(20);
+        ns1.setWaitStartedAt(nsVisit1.getScheduledAt());
+        ns1.setWaitEndedAt(nsVisit1.getScheduledAt().plusMinutes(20));
+        ns1.setNurseNote("敲门约 5 分钟无人应答，询问对门邻居称一早没见人出门；门口等候并三次拨打电话均关机。");
+        ns1.setEarlyLeaveApproved(false);
+        ns1.setStatus(NoShowStatus.EXPLAINED);
+        ns1.setExcuseDeadline(LocalDateTime.now().plusHours(8));
+        ns1.setBilled(false);
+        noShowRepository.save(ns1);
+        VisitPhoto nsPhoto1 = new VisitPhoto();
+        nsPhoto1.setVisit(nsVisit1);
+        nsPhoto1.setFilePath(door1);
+        nsPhoto1.setPhotoType("door");
+        nsPhoto1.setCaption("上门未遇门口照片");
+        photoRepository.save(nsPhoto1);
+
+        FamilyExcuse excuse1 = new FamilyExcuse();
+        excuse1.setExcuseNo("SM20261004001");
+        excuse1.setNoShow(ns1);
+        excuse1.setPatient(p2);
+        excuse1.setSubmitUser(family);
+        excuse1.setReason(FamilyExcuseReason.PHONE_DEAD);
+        excuse1.setContent("实在抱歉，当天老人手机没电关机，家属手机也恰好没电；临时带老人去镇上亲戚家拿东西，"
+                + "回来才看到未接来电。请求不要收空跑费，我们一定注意提前打电话请假，下次巡诊时间都方便。");
+        excuse1.setEvidencePathsJson(null);
+        excuse1.setExpectedHandling("请求减免空跑费，按原计划继续上门");
+        excuse1.setSubmittedAt(LocalDateTime.now().minusHours(18));
+        familyExcuseRepository.save(excuse1);
+
+        // 2) 患者2：4 天前再次未遇，家属说明期已过且未提交说明，卫生院核定收取空跑费（计入演示账单）
+        Visit nsVisit2 = visitRepository.save(scheduledVisit(plan2, p2, nurse1,
+                LocalDateTime.now().minusDays(4).withHour(15).withMinute(30).withSecond(0).withNano(0),
+                "上门未遇，已核定空跑费"));
+        nsVisit2.setStatus(VisitStatus.NO_SHOW);
+        nsVisit2.setStartedAt(nsVisit2.getScheduledAt().minusMinutes(12));
+        nsVisit2.setCompletedAt(nsVisit2.getScheduledAt().plusMinutes(20));
+        visitRepository.save(nsVisit2);
+        String door2 = placeholderImage("door", "门口照片 电话无人接听 " + LocalDate.now().minusDays(4),
+                new Color(245, 238, 232));
+        NoShowRecord ns2 = new NoShowRecord();
+        ns2.setNoShowNo("KP20261001002");
+        ns2.setVisit(nsVisit2);
+        ns2.setPatient(p2);
+        ns2.setNurse(nurse1);
+        ns2.setReason(NoShowReason.NO_ANSWER);
+        ns2.setArrivedAt(nsVisit2.getScheduledAt());
+        ns2.setArrivalLocation(p2.getAddress() + "（GPS 与建档地址一致）");
+        ns2.setArrivalLongitude(p2.getLongitude());
+        ns2.setArrivalLatitude(p2.getLatitude());
+        ns2.setDoorPhotoPathsJson(cn.townhc.homebed.common.Jsons.write(List.of(door2)));
+        ns2.setDialedPhone(p2.getPrimaryContactPhone());
+        ns2.setCallCount(2);
+        ns2.setConnectedCallCount(0);
+        ns2.setCallLogsJson(cn.townhc.homebed.common.Jsons.write(List.of(
+                java.util.Map.of("phone", p2.getPrimaryContactPhone(), "connected", false,
+                        "durationSec", 0, "time", nsVisit2.getScheduledAt().plusMinutes(3).toString()),
+                java.util.Map.of("phone", p2.getPrimaryContactPhone(), "connected", false,
+                        "durationSec", 0, "time", nsVisit2.getScheduledAt().plusMinutes(12).toString())
+        )));
+        ns2.setWaitMinutes(15);
+        ns2.setWaitStartedAt(nsVisit2.getScheduledAt());
+        ns2.setWaitEndedAt(nsVisit2.getScheduledAt().plusMinutes(15));
+        ns2.setNurseNote("按预约上门无人开门，两次拨打家属电话无人接听，等待 15 分钟后离开。");
+        ns2.setEarlyLeaveApproved(false);
+        ns2.setStatus(NoShowStatus.REVIEWED);
+        ns2.setExcuseDeadline(nsVisit2.getScheduledAt().plusHours(24));
+        ns2.setDecision(NoShowDecision.CHARGE_FEE);
+        ns2.setApprovedFee(bd("30"));
+        ns2.setReviewer(admin);
+        ns2.setReviewedAt(LocalDateTime.now().minusDays(3));
+        ns2.setReviewNote("家属未提前请假，说明期内未提交补充说明，按目录标准收取上门空跑费 30 元（自费）。");
+        ns2.setBilled(false);
+        noShowRepository.save(ns2);
+        VisitPhoto nsPhoto2 = new VisitPhoto();
+        nsPhoto2.setVisit(nsVisit2);
+        nsPhoto2.setFilePath(door2);
+        nsPhoto2.setPhotoType("door");
+        nsPhoto2.setCaption("上门未遇门口照片");
+        photoRepository.save(nsPhoto2);
+
+        // 3) 患者3：护士今晨上门得知患者临时送医 → 家庭病床暂停，等待医生重新评估后恢复
+        Visit nsVisit3 = visitRepository.save(scheduledVisit(plan3, p3, nurse3,
+                LocalDateTime.now().minusHours(4).withMinute(30).withSecond(0).withNano(0),
+                "患者临时送医，暂停巡诊待医生复评"));
+        nsVisit3.setStatus(VisitStatus.NO_SHOW);
+        nsVisit3.setStartedAt(nsVisit3.getScheduledAt().minusMinutes(30));
+        nsVisit3.setCompletedAt(nsVisit3.getScheduledAt().plusMinutes(20));
+        visitRepository.save(nsVisit3);
+        String door3 = placeholderImage("door", "门口照片 邻居告知送医 " + LocalDate.now(),
+                new Color(232, 242, 245));
+        NoShowRecord ns3 = new NoShowRecord();
+        ns3.setNoShowNo("KP20261005003");
+        ns3.setVisit(nsVisit3);
+        ns3.setPatient(p3);
+        ns3.setNurse(nurse3);
+        ns3.setReason(NoShowReason.PATIENT_HOSPITALIZED);
+        ns3.setArrivedAt(nsVisit3.getScheduledAt());
+        ns3.setArrivalLocation(p3.getAddress() + "（大岭村，GPS 定位一致）");
+        ns3.setArrivalLongitude(p3.getLongitude());
+        ns3.setArrivalLatitude(p3.getLatitude());
+        ns3.setDoorPhotoPathsJson(cn.townhc.homebed.common.Jsons.write(List.of(door3)));
+        ns3.setDialedPhone(p3.getPrimaryContactPhone());
+        ns3.setCallCount(2);
+        ns3.setConnectedCallCount(1);
+        ns3.setCallLogsJson(cn.townhc.homebed.common.Jsons.write(List.of(
+                java.util.Map.of("phone", p3.getPrimaryContactPhone(), "connected", false,
+                        "durationSec", 0, "time", nsVisit3.getScheduledAt().plusMinutes(2).toString()),
+                java.util.Map.of("phone", p3.getEmergencyPhone(), "connected", true,
+                        "durationSec", 95, "time", nsVisit3.getScheduledAt().plusMinutes(6).toString())
+        )));
+        ns3.setWaitMinutes(10);
+        ns3.setWaitStartedAt(nsVisit3.getScheduledAt());
+        ns3.setWaitEndedAt(nsVisit3.getScheduledAt().plusMinutes(10));
+        ns3.setNurseNote("邻居告知患者昨夜咳喘加重已由家属送县医院急诊；电话接通儿媳确认住院，无法提供服务。");
+        ns3.setEarlyLeaveApproved(false);
+        ns3.setStatus(NoShowStatus.REVIEWED);
+        ns3.setExcuseDeadline(nsVisit3.getScheduledAt().plusHours(24));
+        ns3.setDecision(NoShowDecision.WAIVE);
+        ns3.setApprovedFee(bd("0"));
+        ns3.setReviewer(admin);
+        ns3.setReviewedAt(LocalDateTime.now().minusHours(3));
+        ns3.setReviewNote("患者临时送医属不可归责家属情形，空跑费予以减免；家庭病床暂停，待医生复评。");
+        ns3.setBilled(true);
+        ns3 = noShowRepository.save(ns3);
+        VisitPhoto nsPhoto3 = new VisitPhoto();
+        nsPhoto3.setVisit(nsVisit3);
+        nsPhoto3.setFilePath(door3);
+        nsPhoto3.setPhotoType("door");
+        nsPhoto3.setCaption("上门未遇门口照片");
+        photoRepository.save(nsPhoto3);
+
+        BedPauseRecord pause3 = new BedPauseRecord();
+        pause3.setPauseNo("ZT20261005001");
+        pause3.setApplication(a3);
+        pause3.setPatient(p3);
+        pause3.setReason(BedPauseReason.HOSPITALIZED);
+        pause3.setSourceVisit(nsVisit3);
+        pause3.setSourceNoShow(ns3);
+        pause3.setPauseNote("护士上门确认患者因慢阻肺急性加重新发肺部感染已送县医院住院，暂停巡诊，"
+                + "待出院后由家庭医生重新评估恢复。");
+        pause3.setPausedBy(admin);
+        pause3.setPausedAt(LocalDateTime.now().minusHours(3));
+        pause3.setStatus(BedPauseStatus.PAUSED);
+        bedPauseRepository.save(pause3);
+        ns3.setBedPause(pause3);
+        noShowRepository.save(ns3);
+        // 建床与计划联动暂停
+        a3.setStatus(BedApplyStatus.PAUSED);
+        applicationRepository.save(a3);
+        plan3.setStatus(PlanStatus.PAUSED);
+        planRepository.save(plan3);
+        for (Visit v : visitRepository.findByPlanIdOrderByScheduledAtAsc(plan3.getId())) {
+            if (v.getStatus() == VisitStatus.SCHEDULED) {
+                v.setStatus(VisitStatus.PAUSED);
+                v.setArrangementNote("患者临时送医/暂停巡诊，待医生复评后恢复（暂停单 ZT20261005001）");
+                visitRepository.save(v);
+            }
+        }
+        VisitException hospEx = new VisitException();
+        hospEx.setVisit(nsVisit3);
+        hospEx.setPatient(p3);
+        hospEx.setType(ExceptionType.PATIENT_HOSPITALIZED);
+        hospEx.setDescription("患者临时送医住院，上门未遇，家庭病床已暂停（暂停单 ZT20261005001）");
+        hospEx.setStatus(ExceptionStatus.CONFIRMED);
+        hospEx.setHandler(admin);
+        hospEx.setHandleConclusion("减免本次空跑费用，病床暂停，待家庭医生重新评估出院后恢复巡诊");
+        hospEx.setHandledAt(LocalDateTime.now().minusHours(3));
+        exceptionRepository.save(hospEx);
 
         // 生成一张演示账单（账期覆盖最近 14 天，自动合规初审）
         var auth = new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(

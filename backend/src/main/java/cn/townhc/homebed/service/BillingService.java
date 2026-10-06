@@ -29,6 +29,7 @@ public class BillingService {
     private final VisitRepository visitRepository;
     private final VisitCareResultRepository careResultRepository;
     private final MaterialTransactionRepository materialTxRepository;
+    private final NoShowRecordRepository noShowRepository;
     private final ChargeCatalogRepository catalogRepository;
     private final BedApplicationRepository applicationRepository;
     private final SysUserRepository userRepository;
@@ -150,6 +151,49 @@ public class BillingService {
                 insuranceTotal = insuranceTotal.add(item.getInsuranceAmount());
                 selfTotal = selfTotal.add(item.getSelfPayAmount());
             }
+
+            // 3) 上门未遇空跑费（卫生院审核核定收费的记录，只出一次账）
+            for (NoShowRecord ns : noShowRepository.findByVisitId(visit.getId())) {
+                if (Boolean.TRUE.equals(ns.getBilled())) continue;
+                if (ns.getApprovedFee() == null || ns.getApprovedFee().signum() <= 0) continue;
+                String key = BillSourceType.NO_SHOW_FEE + ":" + ns.getId();
+                if (billedKeys.contains(key)) { skipped++; continue; }
+                ChargeCatalog feeCat = catalogRepository.findByActiveTrueOrderByCategoryAscCodeAsc()
+                        .stream()
+                        .filter(c -> c.getCategory() == CatalogCategory.NO_SHOW_FEE
+                                && NoShowService.NO_SHOW_FEE_CODE.equals(c.getCode()))
+                        .findFirst()
+                        .orElse(catalogRepository.findByActiveTrueOrderByCategoryAscCodeAsc().stream()
+                                .filter(c -> c.getCategory() == CatalogCategory.NO_SHOW_FEE)
+                                .findFirst().orElse(null));
+                BillItem item = new BillItem();
+                item.setBill(bill);
+                item.setSourceType(BillSourceType.NO_SHOW_FEE);
+                item.setSourceId(ns.getId());
+                item.setSourceNo(visit.getVisitNo());
+                item.setServiceDate(serviceDate);
+                item.setItemCode(feeCat != null ? feeCat.getCode() : "KP001");
+                item.setItemName("上门空跑费");
+                item.setCategory(CatalogCategory.NO_SHOW_FEE);
+                item.setQuantity(1);
+                item.setUnitPrice(money(ns.getApprovedFee()));
+                item.setAmount(money(ns.getApprovedFee()));
+                // 空跑费属于家属违约性质费用，医保不予报销，全额自费
+                item.setReimbursable(false);
+                item.setInsuranceCategory("丙类");
+                item.setNote("上门未遇[" + ns.getNoShowNo() + "]空跑费：等待 " + nz(ns.getWaitMinutes())
+                        + " 分钟、拨打 " + nz(ns.getCallCount()) + " 次，审核决定："
+                        + (ns.getDecision() == null ? "核定收费" : ns.getDecision().label)
+                        + (ns.getReviewNote() != null ? "；" + ns.getReviewNote() : ""));
+                applySplit(item, app);
+                billItemRepository.save(item);
+                billedKeys.add(key);
+                total = total.add(item.getAmount());
+                insuranceTotal = insuranceTotal.add(item.getInsuranceAmount());
+                selfTotal = selfTotal.add(item.getSelfPayAmount());
+                ns.setBilled(true);
+                noShowRepository.save(ns);
+            }
         }
 
         bill.setTotalAmount(money(total));
@@ -187,6 +231,8 @@ public class BillingService {
     private BigDecimal money(BigDecimal v) {
         return v.setScale(2, RoundingMode.HALF_UP);
     }
+
+    private String nz(Object o) { return o == null ? "-" : o.toString(); }
 
     @Transactional(readOnly = true)
     public List<Bill> list(String status, Long patientId) {
